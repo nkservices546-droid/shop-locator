@@ -1,5 +1,5 @@
 // Service Worker for Shop Locator & Client Directory (Offline Support)
-const CACHE_NAME = 'shop-locator-cache-v1';
+const CACHE_NAME = 'shop-locator-cache-v2';
 
 // Core app files to cache immediately on install
 const CORE_ASSETS = [
