@@ -559,37 +559,131 @@
 
         // ==================== RENDERING ====================
 
-        function renderClients() {
-            const query = searchInput.value.trim().toLowerCase();
+        function normalizeSearchText(str) {
+            return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        }
 
-            if (query.length > 0) {
+        function levenshteinDistance(a, b) {
+            const m = a.length, n = b.length;
+            if (m === 0) return n;
+            if (n === 0) return m;
+            const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+            for (let i = 0; i <= m; i++) dp[i][0] = i;
+            for (let j = 0; j <= n; j++) dp[0][j] = j;
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+                }
+            }
+            return dp[m][n];
+        }
+
+        function wordSimilarity(a, b) {
+            if (!a || !b) return 0;
+            if (a === b) return 1;
+            if (b.startsWith(a) || a.startsWith(b)) {
+                return (Math.min(a.length, b.length) / Math.max(a.length, b.length)) * 0.92;
+            }
+            const maxLen = Math.max(a.length, b.length);
+            if (maxLen <= 2) return 0;
+            return Math.max(0, 1 - levenshteinDistance(a, b) / maxLen);
+        }
+
+        function scoreClientMatch(client, rawQuery) {
+            const query = normalizeSearchText(rawQuery);
+            if (!query) return { score: 1, matchType: 'all' };
+
+            const name = normalizeSearchText(client.name);
+            const note = normalizeSearchText(client.note);
+            const phone = normalizeSearchText(client.phone);
+            const combined = `${name} ${note} ${phone}`.trim();
+
+            if (name === query || (phone && phone === query)) return { score: 1000, matchType: 'exact' };
+            if (name.startsWith(query)) return { score: 850, matchType: 'direct' };
+            if (name.split(/\s+/).some(w => w.startsWith(query))) return { score: 750, matchType: 'direct' };
+            if (name.includes(query)) return { score: 650, matchType: 'direct' };
+            if (note.includes(query) || phone.includes(query)) return { score: 550, matchType: 'direct' };
+
+            const queryWords = query.split(/\s+/).filter(Boolean);
+            const targetWords = combined.split(/\s+/).filter(Boolean);
+            if (queryWords.length > 1 && queryWords.every(qw => combined.includes(qw))) {
+                return { score: 500, matchType: 'direct' };
+            }
+
+            let totalSim = 0;
+            let matchedWordCount = 0;
+            for (const qw of queryWords) {
+                let bestWordSim = 0;
+                for (const tw of targetWords) {
+                    const sim = wordSimilarity(qw, tw);
+                    if (sim > bestWordSim) bestWordSim = sim;
+                }
+                if (bestWordSim >= 0.55) {
+                    matchedWordCount++;
+                    totalSim += bestWordSim;
+                }
+            }
+
+            const compactQuery = query.replace(/\s+/g, '');
+            const compactName = name.replace(/\s+/g, '');
+            let fullSim = wordSimilarity(compactQuery, compactName);
+            if (compactName.includes(compactQuery) && compactQuery.length >= 3) {
+                fullSim = Math.max(fullSim, 0.85);
+            }
+
+            const avgWordSim = queryWords.length > 0 ? totalSim / queryWords.length : 0;
+            const bestFuzzy = Math.max(avgWordSim, fullSim);
+
+            if (matchedWordCount > 0 && bestFuzzy >= 0.45) {
+                return { score: Math.round(150 + bestFuzzy * 300), matchType: 'related' };
+            }
+            if (fullSim >= 0.52) {
+                return { score: Math.round(120 + fullSim * 280), matchType: 'related' };
+            }
+            return { score: 0, matchType: 'none' };
+        }
+
+        function renderClients() {
+            const rawQuery = searchInput.value.trim();
+
+            if (rawQuery.length > 0) {
                 clearSearchBtn.classList.remove('hidden');
             } else {
                 clearSearchBtn.classList.add('hidden');
             }
 
-            const filtered = clients.filter(c => {
-                if (!query) return true;
-                const nameMatch = (c.name || '').toLowerCase().includes(query);
-                const phoneMatch = (c.phone || '').toLowerCase().includes(query);
-                const noteMatch = (c.note || '').toLowerCase().includes(query);
-                return nameMatch || phoneMatch || noteMatch;
-            });
-
-            filtered.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+            let ranked = [];
+            if (!rawQuery) {
+                ranked = clients
+                    .map(c => ({ client: c, score: 1, matchType: 'all' }))
+                    .sort((a, b) => (b.client.updatedAt || 0) - (a.client.updatedAt || 0));
+            } else {
+                ranked = clients
+                    .map(c => {
+                        const res = scoreClientMatch(c, rawQuery);
+                        return { client: c, score: res.score, matchType: res.matchType };
+                    })
+                    .filter(item => item.score > 0)
+                    .sort((a, b) => (b.score !== a.score ? b.score - a.score : (b.client.updatedAt || 0) - (a.client.updatedAt || 0)));
+            }
 
             const total = clients.length;
             clientCountBadge.textContent = total === 1 ? '1 saved client' : `${total} saved clients`;
-            listHeading.textContent = query
-                ? `Search Results (${filtered.length})`
-                : `Shared Locations (${total})`;
 
-            if (filtered.length === 0) {
+            const hasExactOrDirect = ranked.some(item => item.matchType === 'exact' || item.matchType === 'direct');
+            if (rawQuery && ranked.length > 0 && !hasExactOrDirect) {
+                listHeading.textContent = `Related Results (${ranked.length})`;
+            } else {
+                listHeading.textContent = rawQuery ? `Search Results (${ranked.length})` : `Shared Locations (${total})`;
+            }
+
+            if (ranked.length === 0) {
                 clientList.innerHTML = '';
                 emptyState.classList.remove('hidden');
-                if (query) {
-                    emptyTitle.textContent = `"${searchInput.value.trim()}" nahi mila`;
-                    emptySubtitle.textContent = 'Koi aur naam try karein ya naya client add karein.';
+                if (rawQuery) {
+                    emptyTitle.textContent = `"${rawQuery}" nahi mila`;
+                    emptySubtitle.textContent = 'Koi milta-julta shop bhi nahi mila. Aap naya client add kar sakte hain.';
                 } else {
                     emptyTitle.textContent = 'Abhi koi client save nahi hai';
                     emptySubtitle.textContent = 'Pehla shop/client add karein — ye sabhi phones mein live dikhega.';
@@ -599,19 +693,30 @@
 
             emptyState.classList.add('hidden');
 
-            clientList.innerHTML = filtered.map(client => {
+            const relatedBanner = (rawQuery && !hasExactOrDirect)
+                ? `<div class="px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200/80 text-xs text-amber-800 font-medium">"${escapeHtml(rawQuery)}" exact nahi mila — milte-julte (Related) shops neeche dikh rahe hain:</div>`
+                : '';
+
+            clientList.innerHTML = relatedBanner + ranked.map(({ client, matchType }) => {
                 const safeName = escapeHtml(client.name);
                 const safeNote = escapeHtml(client.note);
                 const safePhone = escapeHtml(client.phone);
                 const safeLink = escapeHtml(client.mapLink);
                 const cleanTel = (client.phone || '').replace(/[^\d+]/g, '');
 
+                let matchBadge = '';
+                if (rawQuery && matchType === 'exact') {
+                    matchBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 ml-1.5 align-middle">Exact Match</span>`;
+                } else if (rawQuery && matchType === 'related') {
+                    matchBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 ml-1.5 align-middle">Related</span>`;
+                }
+
                 return `
                     <article class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md transition">
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0 flex-1">
                                 <h3 class="text-base font-bold text-slate-900 leading-snug break-words">
-                                    ${safeName}
+                                    <span>${safeName}</span>${matchBadge}
                                 </h3>
                                 ${safeNote ? `
                                     <p class="text-xs text-slate-500 mt-1 flex items-center gap-1 break-words">
@@ -628,35 +733,18 @@
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
                                         </svg>
                                         <span>${safePhone}</span>
-                                        <button
-                                            type="button"
-                                            data-action="copy-phone"
-                                            data-value="${safePhone}"
-                                            class="text-[11px] text-indigo-600 hover:underline ml-1"
-                                        >Copy</button>
+                                        <button type="button" data-action="copy-phone" data-value="${safePhone}" class="text-[11px] text-indigo-600 hover:underline ml-1">Copy</button>
                                     </p>
                                 ` : ''}
                             </div>
 
                             <div class="flex items-center gap-1 shrink-0">
-                                <button
-                                    type="button"
-                                    data-action="edit"
-                                    data-id="${escapeHtml(client.id)}"
-                                    title="Edit"
-                                    class="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
-                                >
+                                <button type="button" data-action="edit" data-id="${escapeHtml(client.id)}" title="Edit" class="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                                     </svg>
                                 </button>
-                                <button
-                                    type="button"
-                                    data-action="delete"
-                                    data-id="${escapeHtml(client.id)}"
-                                    title="Delete"
-                                    class="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                                >
+                                <button type="button" data-action="delete" data-id="${escapeHtml(client.id)}" title="Delete" class="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                                     </svg>
@@ -665,12 +753,7 @@
                         </div>
 
                         <div class="mt-3.5 pt-3 border-t border-slate-100 flex items-center gap-2">
-                            <a
-                                href="${safeLink}"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="flex-1 inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
-                            >
+                            <a href="${safeLink}" target="_blank" rel="noopener noreferrer" class="flex-1 inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-sm transition">
                                 <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
                                 </svg>
@@ -678,10 +761,7 @@
                             </a>
 
                             ${cleanTel ? `
-                                <a
-                                    href="tel:${escapeHtml(cleanTel)}"
-                                    class="inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
-                                >
+                                <a href="tel:${escapeHtml(cleanTel)}" class="inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-sm transition">
                                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
                                     </svg>
@@ -693,6 +773,7 @@
                 `;
             }).join('');
         }
+
 
         // ==================== MODAL CONTROLS ====================
 
@@ -757,6 +838,18 @@
             if (!name) {
                 formError.textContent = 'Kripya client ya shop ka naam likhein.';
                 formError.classList.remove('hidden');
+                return;
+            }
+            const currentEditId = editClientId.value || '';
+            const normName = name.toLowerCase().replace(/\s+/g, ' ');
+            const duplicateShop = clients.find(c =>
+                c.id !== currentEditId &&
+                String(c.name || '').trim().toLowerCase().replace(/\s+/g, ' ') === normName
+            );
+            if (duplicateShop) {
+                formError.textContent = `"${duplicateShop.name}" naam ki shop pehle se saved hai! Ek hi naam dobara save nahi ho sakta.`;
+                formError.classList.remove('hidden');
+                clientNameInput.focus();
                 return;
             }
 
