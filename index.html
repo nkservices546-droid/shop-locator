@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Shop Locator & Client Directory</title>
+
+    <!-- PWA Meta Tags (Step 2 mein manifest.json aur sw.js connect honge) -->
+    <meta name="theme-color" content="#4f46e5">
+    <meta name="description" content="Personal offline-ready client directory and Google Maps shop locator.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
+    <link rel="apple-touch-icon" href="icon.svg">
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Smooth scrolling and subtle custom scrollbar */
+        html, body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            overscroll-behavior-y: contain;
+        }
+        /* Slide-up animation for modal on mobile */
+        @keyframes slideUp {
+            from { transform: translateY(24px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-slide-up {
+            animation: slideUp 0.22s ease-out forwards;
+        }
+        /* Toast fade animation */
+        @keyframes fadeInDown {
+            from { transform: translate(-50%, -16px); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .animate-toast {
+            animation: fadeInDown 0.22s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen flex flex-col">
+
+    <!-- ==================== HEADER & STICKY SEARCH ==================== -->
+    <header class="sticky top-0 z-30 bg-indigo-600 text-white shadow-md">
+        <div class="max-w-2xl mx-auto px-4 pt-4 pb-3">
+            <!-- Top Row: App Title + Backup/Restore Actions -->
+            <div class="flex items-center justify-between gap-2 mb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-white/15 backdrop-blur flex items-center justify-center shadow-inner">
+                        <!-- Location Pin Icon -->
+                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="text-lg font-bold leading-tight tracking-tight">Shop Locator</h1>
+                        <p id="clientCountBadge" class="text-xs text-indigo-100 font-medium">0 saved clients</p>
+                    </div>
+                </div>
+
+                <!-- Backup / Restore Buttons -->
+                <div class="flex items-center gap-1.5">
+                    <button
+                        id="exportBtn"
+                        type="button"
+                        title="Backup Data (Download JSON)"
+                        class="p-2.5 rounded-xl bg-white/15 hover:bg-white/25 active:scale-95 transition flex items-center gap-1.5 text-xs font-medium"
+                    >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                        </svg>
+                        <span class="hidden sm:inline">Backup</span>
+                    </button>
+
+                    <label
+                        for="importFileInput"
+                        title="Restore Data (Upload JSON)"
+                        class="p-2.5 rounded-xl bg-white/15 hover:bg-white/25 active:scale-95 transition flex items-center gap-1.5 text-xs font-medium cursor-pointer"
+                    >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                        </svg>
+                        <span class="hidden sm:inline">Restore</span>
+                    </label>
+                    <input type="file" id="importFileInput" accept=".json,application/json" class="hidden" />
+                </div>
+            </div>
+
+            <!-- Search Input Bar -->
+            <div class="relative">
+                <span class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                    </svg>
+                </span>
+                <input
+                    id="searchInput"
+                    type="text"
+                    autocomplete="off"
+                    placeholder="Client ka naam, area ya number search karein..."
+                    class="w-full pl-11 pr-10 py-3 rounded-2xl bg-white text-slate-900 placeholder-slate-400 text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+                <button
+                    id="clearSearchBtn"
+                    type="button"
+                    aria-label="Clear search"
+                    class="hidden absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ==================== MAIN CLIENT LIST ==================== -->
+    <main class="flex-1 w-full max-w-2xl mx-auto px-4 pt-4 pb-28">
+        <!-- Quick Add Banner Button (Visible on Desktop & Mobile) -->
+        <div class="flex items-center justify-between mb-3">
+            <h2 id="listHeading" class="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Saved Locations
+            </h2>
+            <button
+                id="topAddBtn"
+                type="button"
+                class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 active:scale-95 transition text-xs font-semibold"
+            >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                New Client
+            </button>
+        </div>
+
+        <!-- Dynamic Cards Container -->
+        <div id="clientList" class="space-y-3">
+            <!-- Cards rendered via JS -->
+        </div>
+
+        <!-- Empty State (Shown when no clients or no search match) -->
+        <div id="emptyState" class="hidden text-center py-14 px-6 bg-white rounded-3xl border border-slate-200/80 shadow-sm mt-2">
+            <div class="w-14 h-14 mx-auto mb-3 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                </svg>
+            </div>
+            <h3 id="emptyTitle" class="text-base font-semibold text-slate-800">Koi client nahi mila</h3>
+            <p id="emptySubtitle" class="text-sm text-slate-500 mt-1 mb-5">
+                Naya shop ya client add karne ke liye neeche "+ Add Client" button dabayein.
+            </p>
+            <button
+                id="emptyAddBtn"
+                type="button"
+                class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold shadow-sm hover:bg-indigo-700 active:scale-95 transition"
+            >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Add First Client
+            </button>
+        </div>
+    </main>
+
+    <!-- ==================== FLOATING ACTION BUTTON (FAB) ==================== -->
+    <button
+        id="fabAddBtn"
+        type="button"
+        aria-label="Add new client"
+        class="fixed bottom-6 right-5 z-30 flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold text-sm shadow-lg shadow-indigo-600/30 transition"
+    >
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+        <span>Add Client</span>
+    </button>
+
+    <!-- ==================== ADD / EDIT CLIENT MODAL ==================== -->
+    <div id="clientModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl overflow-hidden animate-slide-up">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                <h3 id="modalTitle" class="text-base font-bold text-slate-900">Naya Client Save Karein</h3>
+                <button
+                    id="closeModalBtn"
+                    type="button"
+                    aria-label="Close modal"
+                    class="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+                >
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Modal Form -->
+            <form id="clientForm" class="p-5 space-y-4">
+                <input type="hidden" id="editClientId" />
+
+                <!-- Custom Name Field -->
+                <div>
+                    <label for="clientName" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Client / Shop ka Naam <span class="text-rose-500">*</span>
+                    </label>
+                    <input
+                        id="clientName"
+                        type="text"
+                        required
+                        placeholder="Jaise: Sharma Ji Hardware (Main Market)"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                    />
+                </div>
+
+                <!-- Google Maps Link Field -->
+                <div>
+                    <label for="clientMapLink" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Google Maps Share Link <span class="text-rose-500">*</span>
+                    </label>
+                    <textarea
+                        id="clientMapLink"
+                        rows="2"
+                        required
+                        placeholder="Google Maps ka share link ya poora share text yahan paste karein..."
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition resize-none"
+                    ></textarea>
+                    <p class="text-[11px] text-slate-500 mt-1">
+                        Tip: Poora share message paste karne par link apne aap extract ho jayega.
+                    </p>
+                </div>
+
+                <!-- Phone Number Field -->
+                <div>
+                    <label for="clientPhone" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Mobile / Phone Number (Optional)
+                    </label>
+                    <input
+                        id="clientPhone"
+                        type="tel"
+                        placeholder="Jaise: 9876543210"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                    />
+                </div>
+
+                <!-- Area / Note Field -->
+                <div>
+                    <label for="clientNote" class="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Area / Landmark Note (Optional)
+                    </label>
+                    <input
+                        id="clientNote"
+                        type="text"
+                        placeholder="Jaise: Sector 11, SBI Bank ke paas"
+                        class="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                    />
+                </div>
+
+                <!-- Form Error Box -->
+                <div id="formError" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium"></div>
+
+                <!-- Action Buttons -->
+                <div class="flex items-center gap-2.5 pt-2">
+                    <button
+                        id="cancelModalBtn"
+                        type="button"
+                        class="flex-1 py-3 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 active:scale-95 transition"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        id="saveClientBtn"
+                        type="submit"
+                        class="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 active:scale-95 shadow-sm transition"
+                    >
+                        Save Location
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==================== DELETE CONFIRMATION MODAL ==================== -->
+    <div id="deleteModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 animate-slide-up">
+            <div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-3">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                </svg>
+            </div>
+            <h3 class="text-base font-bold text-slate-900">Client Delete Karein?</h3>
+            <p id="deleteModalMessage" class="text-sm text-slate-600 mt-1 mb-5">
+                Kya aap is client ki location delete karna chahte hain?
+            </p>
+            <div class="flex items-center gap-2.5">
+                <button
+                    id="cancelDeleteBtn"
+                    type="button"
+                    class="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-semibold text-sm hover:bg-slate-50 transition"
+                >
+                    Cancel
+                </button>
+                <button
+                    id="confirmDeleteBtn"
+                    type="button"
+                    class="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-semibold text-sm hover:bg-rose-700 transition"
+                >
+                    Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== TOAST NOTIFICATION ==================== -->
+    <div id="toast" class="hidden fixed top-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-slate-900 text-white text-xs font-semibold shadow-xl flex items-center gap-2 animate-toast">
+        <span id="toastText">Saved!</span>
+    </div>
+
+    <!-- ==================== APPLICATION LOGIC ==================== -->
+    <script>
+        (function () {
+            'use strict';
+
+            // Storage keys
+            const STORAGE_KEY = 'shop_locator_clients_v1';
+            const INIT_FLAG_KEY = 'shop_locator_initialized_v1';
+
+            // Default demo entries shown only on very first launch
+            const SAMPLE_CLIENTS = [
+                {
+                    id: 'sample-1',
+                    name: 'Gupta General Store (Sample)',
+                    mapLink: 'https://maps.google.com/?q=Sector+11+Panchkula',
+                    phone: '9876543210',
+                    note: 'Main Market, Corner Shop',
+                    updatedAt: Date.now()
+                },
+                {
+                    id: 'sample-2',
+                    name: 'Verma Electronics (Sample)',
+                    mapLink: 'https://maps.google.com/?q=Sector+20+Panchkula',
+                    phone: '9812345678',
+                    note: 'Near Bus Stand',
+                    updatedAt: Date.now() - 1000
+                }
+            ];
+
+            // Application State
+            let clients = [];
+            let pendingDeleteId = null;
+            let toastTimer = null;
+
+            // DOM References
+            const searchInput = document.getElementById('searchInput');
+            const clearSearchBtn = document.getElementById('clearSearchBtn');
+            const clientList = document.getElementById('clientList');
+            const emptyState = document.getElementById('emptyState');
+            const emptyTitle = document.getElementById('emptyTitle');
+            const emptySubtitle = document.getElementById('emptySubtitle');
+            const clientCountBadge = document.getElementById('clientCountBadge');
+            const listHeading = document.getElementById('listHeading');
+
+            // Modal References
+            const clientModal = document.getElementById('clientModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const clientForm = document.getElementById('clientForm');
+            const editClientId = document.getElementById('editClientId');
+            const clientNameInput = document.getElementById('clientName');
+            const clientMapLinkInput = document.getElementById('clientMapLink');
+            const clientPhoneInput = document.getElementById('clientPhone');
+            const clientNoteInput = document.getElementById('clientNote');
+            const formError = document.getElementById('formError');
+
+            // Delete Modal References
+            const deleteModal = document.getElementById('deleteModal');
+            const deleteModalMessage = document.getElementById('deleteModalMessage');
+            const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+            const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+
+            // Toast Reference
+            const toastEl = document.getElementById('toast');
+            const toastText = document.getElementById('toastText');
+
+            // ==================== UTILITY FUNCTIONS ====================
+
+            /**
+             * Safely escape HTML to prevent XSS when rendering user input.
+             */
+            function escapeHtml(str) {
+                if (!str) return '';
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            /**
+             * Extracts the first valid HTTP/HTTPS URL from pasted text.
+             * Useful when user pastes full Google Maps share text.
+             */
+            function extractValidUrl(rawText) {
+                const trimmed = (rawText || '').trim();
+                if (!trimmed) return null;
+
+                // Match http:// or https:// URL inside any surrounding text
+                const urlRegex = /(https?:\/\/[^\s]+)/i;
+                const match = trimmed.match(urlRegex);
+                if (match && match[1]) {
+                    try {
+                        const parsed = new URL(match[1]);
+                        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                            return parsed.href;
+                        }
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                // Fallback: if user pasted a domain like maps.app.goo.gl/xxx without https://
+                if (/^(maps\.app\.goo\.gl|goo\.gl\/maps|maps\.google\.|www\.google\.com\/maps)/i.test(trimmed)) {
+                    try {
+                        return new URL('https://' + trimmed.split(/\s+/)[0]).href;
+                    } catch (e) {
+                        return null;
+                    }
+                }
+
+                return null;
+            }
+
+            /**
+             * Shows a brief floating toast message.
+             */
+            function showToast(message) {
+                toastText.textContent = message;
+                toastEl.classList.remove('hidden');
+                clearTimeout(toastTimer);
+                toastTimer = setTimeout(() => {
+                    toastEl.classList.add('hidden');
+                }, 2600);
+            }
+
+            /**
+             * Copies text to clipboard using execCommand for iframe compatibility.
+             */
+            function copyToClipboard(text, label) {
+                try {
+                    const tempInput = document.createElement('textarea');
+                    tempInput.value = text;
+                    tempInput.setAttribute('readonly', '');
+                    tempInput.style.position = 'fixed';
+                    tempInput.style.opacity = '0';
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                    showToast(label + ' copied!');
+                } catch (err) {
+                    showToast('Copy nahi ho paya');
+                }
+            }
+
+            // ==================== STORAGE MANAGEMENT ====================
+
+            function loadClients() {
+                try {
+                    const saved = localStorage.getItem(STORAGE_KEY);
+                    const initialized = localStorage.getItem(INIT_FLAG_KEY);
+
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        if (Array.isArray(parsed)) {
+                            clients = parsed;
+                            return;
+                        }
+                    }
+
+                    // Load sample entries only once on first launch
+                    if (!initialized) {
+                        clients = SAMPLE_CLIENTS.slice();
+                        localStorage.setItem(INIT_FLAG_KEY, 'true');
+                        saveClients();
+                    } else {
+                        clients = [];
+                    }
+                } catch (err) {
+                    console.error('Error loading clients:', err);
+                    clients = [];
+                }
+            }
+
+            function saveClients() {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(clients));
+                    localStorage.setItem(INIT_FLAG_KEY, 'true');
+                } catch (err) {
+                    console.error('Error saving clients:', err);
+                    showToast('Storage full ya unavailable hai');
+                }
+            }
+
+            // ==================== RENDERING ====================
+
+            function renderClients() {
+                const query = searchInput.value.trim().toLowerCase();
+
+                // Show/hide clear search button
+                if (query.length > 0) {
+                    clearSearchBtn.classList.remove('hidden');
+                } else {
+                    clearSearchBtn.classList.add('hidden');
+                }
+
+                // Filter clients by custom name, phone, or note
+                const filtered = clients.filter(c => {
+                    if (!query) return true;
+                    const nameMatch = (c.name || '').toLowerCase().includes(query);
+                    const phoneMatch = (c.phone || '').toLowerCase().includes(query);
+                    const noteMatch = (c.note || '').toLowerCase().includes(query);
+                    return nameMatch || phoneMatch || noteMatch;
+                });
+
+                // Sort newest updated first
+                filtered.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+                // Update count badge & heading
+                const total = clients.length;
+                clientCountBadge.textContent = total === 1 ? '1 saved client' : `${total} saved clients`;
+                listHeading.textContent = query
+                    ? `Search Results (${filtered.length})`
+                    : `Saved Locations (${total})`;
+
+                // Render empty state if needed
+                if (filtered.length === 0) {
+                    clientList.innerHTML = '';
+                    emptyState.classList.remove('hidden');
+                    if (query) {
+                        emptyTitle.textContent = `"${searchInput.value.trim()}" nahi mila`;
+                        emptySubtitle.textContent = 'Koi aur naam try karein ya naya client add karein.';
+                    } else {
+                        emptyTitle.textContent = 'Abhi koi client save nahi hai';
+                        emptySubtitle.textContent = 'Apna pehla shop/client aur Google Maps link save karein.';
+                    }
+                    return;
+                }
+
+                emptyState.classList.add('hidden');
+
+                // Build cards HTML
+                clientList.innerHTML = filtered.map(client => {
+                    const safeName = escapeHtml(client.name);
+                    const safeNote = escapeHtml(client.note);
+                    const safePhone = escapeHtml(client.phone);
+                    const safeLink = escapeHtml(client.mapLink);
+                    const cleanTel = (client.phone || '').replace(/[^\d+]/g, '');
+
+                    return `
+                        <article class="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md transition">
+                            <!-- Top Row: Name, Note & Edit/Delete Controls -->
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <h3 class="text-base font-bold text-slate-900 leading-snug break-words">
+                                        ${safeName}
+                                    </h3>
+                                    ${safeNote ? `
+                                        <p class="text-xs text-slate-500 mt-1 flex items-center gap-1 break-words">
+                                            <svg class="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                                            </svg>
+                                            <span>${safeNote}</span>
+                                        </p>
+                                    ` : ''}
+                                    ${safePhone ? `
+                                        <p class="text-xs font-medium text-slate-600 mt-1 flex items-center gap-1.5">
+                                            <svg class="w-3.5 h-3.5 shrink-0 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                                            </svg>
+                                            <span>${safePhone}</span>
+                                            <button
+                                                type="button"
+                                                data-action="copy-phone"
+                                                data-value="${safePhone}"
+                                                class="text-[11px] text-indigo-600 hover:underline ml-1"
+                                            >Copy</button>
+                                        </p>
+                                    ` : ''}
+                                </div>
+
+                                <!-- Edit & Delete Icon Buttons -->
+                                <div class="flex items-center gap-1 shrink-0">
+                                    <button
+                                        type="button"
+                                        data-action="edit"
+                                        data-id="${escapeHtml(client.id)}"
+                                        title="Edit"
+                                        class="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        data-action="delete"
+                                        data-id="${escapeHtml(client.id)}"
+                                        title="Delete"
+                                        class="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                                    >
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Bottom Row: Primary One-Tap Action Buttons -->
+                            <div class="mt-3.5 pt-3 border-t border-slate-100 flex items-center gap-2">
+                                <a
+                                    href="${safeLink}"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    class="flex-1 inline-flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
+                                >
+                                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 00-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0z" />
+                                    </svg>
+                                    <span>Open Google Maps</span>
+                                </a>
+
+                                ${cleanTel ? `
+                                    <a
+                                        href="tel:${escapeHtml(cleanTel)}"
+                                        class="inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs sm:text-sm font-semibold shadow-sm transition"
+                                    >
+                                        <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                                        </svg>
+                                        <span>Call</span>
+                                    </a>
+                                ` : ''}
+                            </div>
+                        </article>
+                    `;
+                }).join('');
+            }
+
+            // ==================== MODAL CONTROLS ====================
+
+            function openAddModal() {
+                editClientId.value = '';
+                clientForm.reset();
+                formError.classList.add('hidden');
+                modalTitle.textContent = 'Naya Client Save Karein';
+                clientModal.classList.remove('hidden');
+                setTimeout(() => clientNameInput.focus(), 120);
+            }
+
+            function openEditModal(id) {
+                const target = clients.find(c => c.id === id);
+                if (!target) return;
+
+                editClientId.value = target.id;
+                clientNameInput.value = target.name || '';
+                clientMapLinkInput.value = target.mapLink || '';
+                clientPhoneInput.value = target.phone || '';
+                clientNoteInput.value = target.note || '';
+                formError.classList.add('hidden');
+                modalTitle.textContent = 'Client Edit Karein';
+                clientModal.classList.remove('hidden');
+                setTimeout(() => clientNameInput.focus(), 120);
+            }
+
+            function closeClientModal() {
+                clientModal.classList.add('hidden');
+            }
+
+            function openDeleteModal(id) {
+                const target = clients.find(c => c.id === id);
+                if (!target) return;
+                pendingDeleteId = id;
+                deleteModalMessage.textContent = `Kya aap "${target.name}" ko permanently delete karna chahte hain?`;
+                deleteModal.classList.remove('hidden');
+            }
+
+            function closeDeleteModal() {
+                pendingDeleteId = null;
+                deleteModal.classList.add('hidden');
+            }
+
+            // ==================== FORM SUBMISSION ====================
+
+            clientForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                formError.classList.add('hidden');
+
+                const name = clientNameInput.value.trim();
+                const rawLink = clientMapLinkInput.value.trim();
+                const phone = clientPhoneInput.value.trim();
+                const note = clientNoteInput.value.trim();
+
+                if (!name) {
+                    formError.textContent = 'Kripya client ya shop ka naam likhein.';
+                    formError.classList.remove('hidden');
+                    return;
+                }
+
+                const extractedUrl = extractValidUrl(rawLink);
+                if (!extractedUrl) {
+                    formError.textContent = 'Valid Google Maps link nahi mila. Kripya https:// se shuru hone wala link paste karein.';
+                    formError.classList.remove('hidden');
+                    return;
+                }
+
+                const existingId = editClientId.value;
+                if (existingId) {
+                    // Update existing client
+                    const idx = clients.findIndex(c => c.id === existingId);
+                    if (idx !== -1) {
+                        clients[idx] = {
+                            ...clients[idx],
+                            name,
+                            mapLink: extractedUrl,
+                            phone,
+                            note,
+                            updatedAt: Date.now()
+                        };
+                    }
+                    showToast('Client details update ho gayi!');
+                } else {
+                    // Add new client
+                    clients.unshift({
+                        id: 'c-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+                        name,
+                        mapLink: extractedUrl,
+                        phone,
+                        note,
+                        updatedAt: Date.now()
+                    });
+                    showToast('Naya client save ho gaya!');
+                }
+
+                saveClients();
+                renderClients();
+                closeClientModal();
+            });
+
+            // ==================== BACKUP & RESTORE ====================
+
+            document.getElementById('exportBtn').addEventListener('click', function () {
+                try {
+                    const dataStr = JSON.stringify(clients, null, 2);
+                    const blob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    const dateStamp = new Date().toISOString().slice(0, 10);
+                    a.href = url;
+                    a.download = `shop-locator-backup-${dateStamp}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    showToast('Backup file download ho gayi!');
+                } catch (err) {
+                    showToast('Backup download karne mein dikkat aayi');
+                }
+            });
+
+            document.getElementById('importFileInput').addEventListener('change', function (e) {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    try {
+                        const imported = JSON.parse(event.target.result);
+                        if (!Array.isArray(imported)) {
+                            throw new Error('Invalid format');
+                        }
+
+                        // Validate and normalize imported records
+                        const validRecords = imported.filter(item => item && item.name && item.mapLink).map(item => ({
+                            id: item.id || ('c-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7)),
+                            name: String(item.name).trim(),
+                            mapLink: extractValidUrl(item.mapLink) || String(item.mapLink).trim(),
+                            phone: item.phone ? String(item.phone).trim() : '',
+                            note: item.note ? String(item.note).trim() : '',
+                            updatedAt: item.updatedAt || Date.now()
+                        }));
+
+                        if (validRecords.length === 0) {
+                            showToast('Backup file mein koi valid client nahi mila');
+                            return;
+                        }
+
+                        // Merge without duplicating exact IDs
+                        const existingMap = new Map(clients.map(c => [c.id, c]));
+                        validRecords.forEach(rec => existingMap.set(rec.id, rec));
+                        clients = Array.from(existingMap.values());
+
+                        saveClients();
+                        renderClients();
+                        showToast(`${validRecords.length} clients restore ho gaye!`);
+                    } catch (err) {
+                        showToast('Galat backup file! Valid JSON file chunein.');
+                    } finally {
+                        e.target.value = '';
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            // ==================== EVENT LISTENERS ====================
+
+            // Search input
+            searchInput.addEventListener('input', renderClients);
+            clearSearchBtn.addEventListener('click', function () {
+                searchInput.value = '';
+                renderClients();
+                searchInput.focus();
+            });
+
+            // Open Add Modal triggers
+            document.getElementById('fabAddBtn').addEventListener('click', openAddModal);
+            document.getElementById('topAddBtn').addEventListener('click', openAddModal);
+            document.getElementById('emptyAddBtn').addEventListener('click', openAddModal);
+
+            // Close Add Modal triggers
+            document.getElementById('closeModalBtn').addEventListener('click', closeClientModal);
+            document.getElementById('cancelModalBtn').addEventListener('click', closeClientModal);
+            clientModal.addEventListener('click', function (e) {
+                if (e.target === clientModal) closeClientModal();
+            });
+
+            // Delete Modal triggers
+            cancelDeleteBtn.addEventListener('click', closeDeleteModal);
+            deleteModal.addEventListener('click', function (e) {
+                if (e.target === deleteModal) closeDeleteModal();
+            });
+            confirmDeleteBtn.addEventListener('click', function () {
+                if (!pendingDeleteId) return;
+                clients = clients.filter(c => c.id !== pendingDeleteId);
+                saveClients();
+                renderClients();
+                closeDeleteModal();
+                showToast('Client delete ho gaya');
+            });
+
+            // Event Delegation for Edit, Delete, and Copy Phone inside Client List
+            clientList.addEventListener('click', function (e) {
+                const btn = e.target.closest('button[data-action]');
+                if (!btn) return;
+
+                const action = btn.getAttribute('data-action');
+                const id = btn.getAttribute('data-id');
+
+                if (action === 'edit') {
+                    openEditModal(id);
+                } else if (action === 'delete') {
+                    openDeleteModal(id);
+                } else if (action === 'copy-phone') {
+                    copyToClipboard(btn.getAttribute('data-value'), 'Number');
+                }
+            });
+
+            // ==================== PWA SERVICE WORKER REGISTRATION ====================
+            if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+                window.addEventListener('load', function () {
+                    navigator.serviceWorker.register('sw.js').catch(function () {
+                        // Silent catch during preview/local file opening before sw.js is added
+                    });
+                });
+            }
+
+            // ==================== INITIALIZE APP ====================
+            loadClients();
+            renderClients();
+        })();
+    </script>
+</body>
+</html>

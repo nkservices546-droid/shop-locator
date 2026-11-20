@@ -1,0 +1,19 @@
+{
+"name": "Shop Locator & Client Directory",
+"short_name": "Shop Locator",
+"description": "Personal offline-ready client directory and Google Maps shop locator.",
+"start_url": "./index.html",
+"scope": "./",
+"display": "standalone",
+"orientation": "portrait",
+"background_color": "#f8fafc",
+"theme_color": "#4f46e5",
+"icons": [
+{
+"src": "icon.svg",
+"sizes": "any",
+"type": "image/svg+xml",
+"purpose": "any maskable"
+}
+]
+}
